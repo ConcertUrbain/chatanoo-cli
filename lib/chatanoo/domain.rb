@@ -7,12 +7,12 @@ module Chatanoo
 
     def initialize(*args)
       super
-      @config = YAML::load(File.open("#{ENV['HOME']}/.chatanoo/#{options[:env]}.yml")) if options[:env]
+      $config = YAML::load(File.open("#{ENV['HOME']}/.chatanoo/#{options[:env]}.yml")) if options[:env]
       @route53 = Aws::Route53::Client.new({
-        region: @config[:aws_region],
+        region: $config[:aws_region],
         credentials: Aws::Credentials.new(
-          @config[:aws_access_key_id],
-          @config[:aws_secret_access_key]
+          $config[:aws_access_key_id],
+          $config[:aws_secret_access_key]
         )
       })
     end
@@ -28,7 +28,7 @@ module Chatanoo
           resource_type: resp.hosted_zone.id.split('/')[1],
           resource_id: resp.hosted_zone.id.split('/')[2],
           add_tags: [
-            { key: "chatanoo:env", value: @config[:env] },
+            { key: "chatanoo:env", value: $config[:env] },
             { key: "chatanoo:type", value: 'production' },
             { key: "chatanoo:role", value: 'hosting' }
           ]
@@ -41,15 +41,15 @@ module Chatanoo
 
       say Rainbow("- #{domain} hosted zone created!").green
 
-      @config[:route53] = {} unless @config[:route53]
-      @config[:route53][domain] = resp.hosted_zone
+      $config[:route53] = {} unless $config[:route53]
+      $config[:route53][domain] = resp.hosted_zone
       save_config
     end
 
     desc "delete DOMAIN", "delete domain"
     def delete(domain)
       begin
-        zone = @config[:route53][domain]
+        zone = $config[:route53][domain]
         @route53.delete_hosted_zone({
           id: zone.id
         })
@@ -61,15 +61,15 @@ module Chatanoo
 
       say Rainbow("- #{domain} hosted zone deleted!").green
 
-      @config[:route53].delete(domain)
+      $config[:route53].delete(domain)
       save_config
     end
 
     private
     def save_config
-      filename = "#{ENV['HOME']}/.chatanoo/#{@config[:env]}.yml"
+      filename = "#{ENV['HOME']}/.chatanoo/#{$config[:env]}.yml"
       File.open(filename, "w") do |f|
-        f.write( @config.to_yaml )
+        f.write( $config.to_yaml )
       end
     end
   end

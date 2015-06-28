@@ -7,26 +7,26 @@ module Chatanoo
 
     def initialize(*args)
       super
-      @config = YAML::load(File.open("#{ENV['HOME']}/.chatanoo/#{options[:env]}.yml")) if options[:env]
+      $config = YAML::load(File.open("#{ENV['HOME']}/.chatanoo/#{options[:env]}.yml")) if options[:env]
       @s3 = Aws::S3::Client.new({
-        region: @config[:aws_region],
+        region: $config[:aws_region],
         credentials: Aws::Credentials.new(
-          @config[:aws_access_key_id],
-          @config[:aws_secret_access_key]
+          $config[:aws_access_key_id],
+          $config[:aws_secret_access_key]
         )
       })
       @route53 = Aws::Route53::Client.new({
-        region: @config[:aws_region],
+        region: $config[:aws_region],
         credentials: Aws::Credentials.new(
-          @config[:aws_access_key_id],
-          @config[:aws_secret_access_key]
+          $config[:aws_access_key_id],
+          $config[:aws_secret_access_key]
         )
       })
       @cloudFront = Aws::CloudFront::Client.new({
-        region: @config[:aws_region],
+        region: $config[:aws_region],
         credentials: Aws::Credentials.new(
-          @config[:aws_access_key_id],
-          @config[:aws_secret_access_key]
+          $config[:aws_access_key_id],
+          $config[:aws_secret_access_key]
         )
       })
     end
@@ -53,13 +53,13 @@ module Chatanoo
 
     private
     def create_bucket(name)
-      bucketName = "chatanoo-#{@config[:env]}-#{name}"
+      bucketName = "chatanoo-#{$config[:env]}-#{name}"
       begin
         @s3.create_bucket({
           acl: "public-read",
           bucket: bucketName,
           create_bucket_configuration: {
-            location_constraint: @config[:aws_region]
+            location_constraint: $config[:aws_region]
           }
         })
         @s3.put_bucket_cors({
@@ -79,7 +79,7 @@ module Chatanoo
           bucket: bucketName,
           tagging: {
             tag_set: [
-              { key: "chatanoo:env", value: @config[:env] },
+              { key: "chatanoo:env", value: $config[:env] },
               { key: "chatanoo:type", value: 'production' },
               { key: "chatanoo:role", value: 'cdn' }
             ],
@@ -94,7 +94,7 @@ module Chatanoo
     end
 
     def delete_bucket(name)
-      bucketName = "chatanoo-#{@config[:env]}-#{name}"
+      bucketName = "chatanoo-#{$config[:env]}-#{name}"
       begin
         @s3.delete_bucket({
           bucket: bucketName
@@ -108,7 +108,7 @@ module Chatanoo
     end
 
     def create_cloudfront(name, domain)
-      bucketName = "chatanoo-#{@config[:env]}-#{name}"
+      bucketName = "chatanoo-#{$config[:env]}-#{name}"
       begin
         resp = @cloudFront.create_distribution({
           distribution_config: { # required
@@ -162,9 +162,9 @@ module Chatanoo
         fail err
       end
 
-      @config[:cloudfront] = {} unless @config[:cloudfront]
-      @config[:cloudfront][domain] = {} unless @config[:cloudfront][domain]
-      @config[:cloudfront][domain][name] = {
+      $config[:cloudfront] = {} unless $config[:cloudfront]
+      $config[:cloudfront][domain] = {} unless $config[:cloudfront][domain]
+      $config[:cloudfront][domain][name] = {
         id: resp.distribution.id,
         domain_name: resp.distribution.domain_name,
       }
@@ -174,7 +174,7 @@ module Chatanoo
 
     def delete_cloudfront(name, domain)
       begin
-        id = @config[:cloudfront][domain][name][:id]
+        id = $config[:cloudfront][domain][name][:id]
         resp = @cloudFront.get_distribution({
           id: id
         });
@@ -194,17 +194,17 @@ module Chatanoo
         fail err
       end
 
-      @config[:cloudfront].delete(domain)
+      $config[:cloudfront].delete(domain)
 
       say Rainbow("- CloudFront Distribution for #{name} s3 bucket deleted!").green
       say Rainbow("--> /!\ Think to delete the CloudFront Distribution #{id} in the AWS Console").yellow
     end
 
     def create_dns_record(name, domain)
-      bucketName = "chatanoo-#{@config[:env]}-#{name}"
+      bucketName = "chatanoo-#{$config[:env]}-#{name}"
       begin
         @route53.change_resource_record_sets({
-          hosted_zone_id: @config[:route53][domain].id, # required
+          hosted_zone_id: $config[:route53][domain].id, # required
           change_batch: { # required
             comment: "Add Record Set for CloudFront Distribution for #{bucketName} s3 bucket",
             changes: [ # required
@@ -215,7 +215,7 @@ module Chatanoo
                   type: "CNAME", # required, accepts SOA, A, TXT, NS, CNAME, MX, PTR, SRV, SPF, AAAA
                   ttl: 300,
                   resource_records: [
-                    { value: @config[:cloudfront][domain][name][:domain_name] }
+                    { value: $config[:cloudfront][domain][name][:domain_name] }
                   ]
                 },
               },
@@ -231,10 +231,10 @@ module Chatanoo
     end
 
     def delete_dns_record(name, domain)
-      bucketName = "chatanoo-#{@config[:env]}-#{name}"
+      bucketName = "chatanoo-#{$config[:env]}-#{name}"
       begin
         @route53.change_resource_record_sets({
-          hosted_zone_id: @config[:route53][domain].id, # required
+          hosted_zone_id: $config[:route53][domain].id, # required
           change_batch: { # required
             comment: "Delete Record Set for CloudFront Distribution for #{bucketName} s3 bucket",
             changes: [ # required
@@ -245,7 +245,7 @@ module Chatanoo
                   type: "CNAME", # required, accepts SOA, A, TXT, NS, CNAME, MX, PTR, SRV, SPF, AAAA
                   ttl: 300,
                   resource_records: [
-                    { value: @config[:cloudfront][domain][name][:domain_name] }
+                    { value: $config[:cloudfront][domain][name][:domain_name] }
                   ]
                 },
               },
@@ -261,9 +261,9 @@ module Chatanoo
     end
 
     def save_config
-      filename = "#{ENV['HOME']}/.chatanoo/#{@config[:env]}.yml"
+      filename = "#{ENV['HOME']}/.chatanoo/#{$config[:env]}.yml"
       File.open(filename, "w") do |f|
-        f.write( @config.to_yaml )
+        f.write( $config.to_yaml )
       end
     end
   end

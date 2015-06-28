@@ -1,3 +1,5 @@
+require 'json'
+
 module Chatanoo
 
   class Transcoder < Thor
@@ -5,35 +7,38 @@ module Chatanoo
 
     def initialize(*args)
       super
-      @config = YAML::load(File.open("#{ENV['HOME']}/.chatanoo/#{options[:env]}.yml")) if options[:env]
+      $config = YAML::load(File.open("#{ENV['HOME']}/.chatanoo/#{options[:env]}.yml")) if options[:env]
       @transcoder = Aws::ElasticTranscoder::Client.new({
-        region: @config[:aws_region],
+        region: $config[:aws_region],
         credentials: Aws::Credentials.new(
-          @config[:aws_access_key_id],
-          @config[:aws_secret_access_key]
+          $config[:aws_access_key_id],
+          $config[:aws_secret_access_key]
         )
       })
+      @iam = Chatanoo::Iam.new(*args)
     end
 
     desc "create INPUT OUTPUT ROLE", "create transcoder"
-    def create(input, output, role)
+    def create(input, output)
       create_presets
-      create_pipeline(input, output, role)
+      @iam.create_role("transcoder", get_transcoder_role_policy())
+      create_pipeline(input, output, $config[:iam]["transcoder"][:role])
     end
 
     desc "delete", "delete transcoder"
     def delete
       delete_pipeline
       delete_presets
+      @iam.delete_role("transcoder")
     end
 
     desc "create_pipeline INPUT OUTPUT ROLE", "create transcoding pipeline"
     def create_pipeline(input, output, role)
       begin
         resp = @transcoder.create_pipeline({
-          name: "Chatanoo - #{@config[:env]} - Pipeline", # required
-          input_bucket: "chatanoo-#{@config[:env]}-#{input}", # required
-          output_bucket: "chatanoo-#{@config[:env]}-#{output}",
+          name: "Chatanoo - #{$config[:env]} - Pipeline", # required
+          input_bucket: "chatanoo-#{$config[:env]}-#{input}", # required
+          output_bucket: "chatanoo-#{$config[:env]}-#{output}",
           role: role, # required
         })
       rescue Exception => err
@@ -44,8 +49,8 @@ module Chatanoo
 
       say Rainbow("- Pipeline created!").green
 
-      @config[:transcoder] = {} unless @config[:transcoder]
-      @config[:transcoder][:pipeline] = resp.pipeline.id
+      $config[:transcoder] = {} unless $config[:transcoder]
+      $config[:transcoder][:pipeline] = resp.pipeline.id
       save_config
     end
 
@@ -53,7 +58,7 @@ module Chatanoo
     def delete_pipeline
       begin
         @transcoder.delete_pipeline({
-          id: @config[:transcoder][:pipeline]
+          id: $config[:transcoder][:pipeline]
         })
       rescue Exception => err
         say Rainbow("Fail to delete pipeline!").red
@@ -63,7 +68,7 @@ module Chatanoo
 
       say Rainbow("- Pipeline deleted!").green
 
-      @config[:transcoder].delete(:pipeline)
+      $config[:transcoder].delete(:pipeline)
       save_config
     end
 
@@ -82,14 +87,14 @@ module Chatanoo
 
       say Rainbow("- Presets created!").green
 
-      @config[:transcoder] = {} unless @config[:transcoder]
-      @config[:transcoder][:presets] = presets
+      $config[:transcoder] = {} unless $config[:transcoder]
+      $config[:transcoder][:presets] = presets
       save_config
     end
 
     desc "delete_presets", "delete all presets for transcoding"
     def delete_presets
-      presets = @config[:transcoder][:presets]
+      presets = $config[:transcoder][:presets]
       begin
         presets.each do |(type, id)|
           @transcoder.delete_preset(id: id)
@@ -102,22 +107,58 @@ module Chatanoo
 
       say Rainbow("- Presets deleted!").green
 
-      @config[:transcoder].delete(:presets)
+      $config[:transcoder].delete(:presets)
       save_config
     end
 
     private
+
     def save_config
-      filename = "#{ENV['HOME']}/.chatanoo/#{@config[:env]}.yml"
+      filename = "#{ENV['HOME']}/.chatanoo/#{$config[:env]}.yml"
       File.open(filename, "w") do |f|
-        f.write( @config.to_yaml )
+        f.write( $config.to_yaml )
       end
+    end
+
+    def get_transcoder_role_policy
+      policy = {
+        "Version" => "2012-10-17",
+        "Statement" => [{
+            "Sid" => "1",
+            "Effect" => "Allow",
+            "Action" => [
+              "s3:ListBucket",
+              "s3:Put*",
+              "s3:Get*",
+              "s3:*MultipartUpload*"
+            ],
+            "Resource" => ["*"]
+          }, {
+            "Sid" => "2",
+            "Effect" => "Allow",
+            "Action" => ["sns:Publish"],
+            "Resource" => ["*"]
+          }, {
+            "Sid" => "3",
+            "Effect" => "Deny",
+            "Action" => [
+                "s3:*Policy*",
+                "sns:*Permission*",
+                "sns:*Delete*",
+                "s3:*Delete*",
+                "sns:*Remove*"
+            ],
+            "Resource" => ["*"]
+          }
+        ]
+      }
+      JSON.pretty_generate( policy )
     end
 
     def get_presets
       {
         mp4: {
-          name: "Chatanoo - #{@config[:env]} - MP4", # required
+          name: "Chatanoo - #{$config[:env]} - MP4", # required
           description: "",
           container: "mp4", # required
           video: {
@@ -158,7 +199,7 @@ module Chatanoo
           },
         },
         webm: {
-          name: "Chatanoo - #{@config[:env]} - WebM", # required
+          name: "Chatanoo - #{$config[:env]} - WebM", # required
           description: "",
           container: "webm", # required
           video: {
@@ -192,7 +233,7 @@ module Chatanoo
           },
         },
         flv: {
-          name: "Chatanoo - #{@config[:env]} - FLV", # required
+          name: "Chatanoo - #{$config[:env]} - FLV", # required
           description: "",
           container: "flv", # required
           video: {
@@ -233,7 +274,7 @@ module Chatanoo
           },
         },
         mp3: {
-          name: "Chatanoo - #{@config[:env]} - MP3", # required
+          name: "Chatanoo - #{$config[:env]} - MP3", # required
           description: "",
           container: "mp3", # required
           audio: {
@@ -244,7 +285,7 @@ module Chatanoo
           }
         },
         ogg: {
-          name: "Chatanoo - #{@config[:env]} - OGG", # required
+          name: "Chatanoo - #{$config[:env]} - OGG", # required
           description: "",
           container: "ogg", # required
           audio: {

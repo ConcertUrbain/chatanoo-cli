@@ -1,3 +1,5 @@
+$config = {}
+
 require 'thor'
 require 'highline/import'
 require 'rainbow'
@@ -9,5 +11,6 @@ require 'chatanoo/cli'
 require 'chatanoo/domain'
 require 'chatanoo/s3'
 require 'chatanoo/transcoder'
+require 'chatanoo/iam'
 
 require 'chatanoo/flow'
